@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator
 
     import torch
 
@@ -28,7 +28,7 @@ class KVState(NamedTuple):
 class KVCache(Protocol):
     """Stores layerwise key and value tensors, which are used by an Inferencer during inference."""
 
-    def update(self, kv_states: Sequence[KVState]) -> None:
+    def update(self, kv_states: Iterator[KVState]) -> None:
         """Update the storage with new key and value tensors.
 
         The length of `kv_states` should be equal to the number of transformer layers,
@@ -37,7 +37,8 @@ class KVCache(Protocol):
         All key and value tensors in `kv_states` should have the same shape.
 
         Args:
-            kv_states (Sequence[KVState]): New key and value tensors for each transformer layer.
+            kv_states (Iterator[KVState]): Iterator of KVState, where each KVState contains
+                the new key and value tensors for the corresponding layer.
         """
         ...
 

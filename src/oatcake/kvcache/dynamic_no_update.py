@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, override
 from .dynamic import DynamicCache
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator
 
     from oatcake.interface import KVState
 
@@ -25,7 +25,7 @@ class DynamicNoUpdateCache(DynamicCache):
         super().__init__()
 
     @override
-    def update(self, kv_states: Sequence[KVState]) -> None:
+    def update(self, kv_states: Iterator[KVState]) -> None:
         """Intentionally a no-op, the underlying model will update `self.cache` in-place."""
 
 

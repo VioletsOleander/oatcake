@@ -2,14 +2,12 @@
 
 from typing import TYPE_CHECKING, NamedTuple, override
 
-from oatcake.interface import Model
+from oatcake.interface import KVCache, KVState, Model
 
 from .transformer import Transformer
 
 if TYPE_CHECKING:
     import torch
-
-    from oatcake.interface import KVCache
 
 __all__ = ["FakeModel", "FakeModelConfig"]
 
@@ -63,4 +61,14 @@ class FakeModel(Model):
     @override
     def forward(self, query_token_ids: torch.Tensor, kv_cache: KVCache) -> torch.Tensor:
         """Perform a forward pass through the fake model."""
-        return self.transformer(query_token_ids, kv_cache)
+        kv_states = kv_cache.get_kv_states()
+        kv_states = kv_states if len(kv_states) > 0 else None
+
+        logits, new_kv_states = self.transformer.forward(
+            query_token_ids=query_token_ids, kv_cache=kv_states
+        )
+
+        new_kv_states = map(KVState._make, new_kv_states)
+        kv_cache.update(kv_states=new_kv_states)
+
+        return logits

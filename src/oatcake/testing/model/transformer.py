@@ -1,9 +1,12 @@
 """Provide `Transformer`, which is a simple implementation of decoder-only transformer Model."""
 
+from typing import TYPE_CHECKING
+
 import torch
 from torch import nn
 
-from oatcake.interface import KVCache, KVState
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = ["Transformer"]
 
@@ -36,17 +39,19 @@ class _Attention(nn.Module):
         self.out_linear = nn.Linear(embed_dim, embed_dim)
 
     def forward(
-        self, embedding: torch.Tensor, kv_cache: KVState | None
-    ) -> tuple[torch.Tensor, KVState]:
+        self, embedding: torch.Tensor, kv_cache: tuple[torch.Tensor, torch.Tensor] | None
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """Compute attention output for the given query and KV cache.
 
         Args:
             embedding (torch.Tensor): Input embedding of shape (batch_size, seq_len, embed_dim).
-            kv_cache (KVState | None): Tuple of cached key and value tensors, or None if no cache is available.
+            kv_cache (tuple[torch.Tensor, torch.Tensor] | None): Tuple of cached key and value tensors,
+                or None if no cache is available.
 
         Returns:
-            tuple[torch.Tensor, KVState]: Attention output of shape (batch_size, seq_len, embed_dim)
-                and newly computed KVState for the current input.
+            tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]: Attention output of shape
+                (batch_size, seq_len, embed_dim) and newly computed tuple of key and value tensors
+                for the current input.
         """
         batch_size, num_q_tokens, _ = embedding.size()
         device = embedding.device
@@ -81,7 +86,7 @@ class _Attention(nn.Module):
 
         # Out projection
         attn_output = attn_output.transpose(1, 2).reshape(batch_size, num_q_tokens, self.embed_dim)
-        return self.out_linear(attn_output), KVState(keys=k, values=v)
+        return self.out_linear(attn_output), (k, v)
 
 
 class _TransformerBlock(nn.Module):
@@ -104,17 +109,18 @@ class _TransformerBlock(nn.Module):
         self.norm2 = nn.LayerNorm(embed_dim)
 
     def forward(
-        self, embedding: torch.Tensor, kv_cache: KVState | None
-    ) -> tuple[torch.Tensor, KVState]:
+        self, embedding: torch.Tensor, kv_cache: tuple[torch.Tensor, torch.Tensor] | None
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """Forward the input embedding through the transformer block.
 
         Args:
             embedding (torch.Tensor): Input embedding of shape (batch_size, seq_len, embed_dim).
-            kv_cache (KVState | None): Tuple of cached key and value tensors, or None if no cache is available.
+            kv_cache (tuple[torch.Tensor, torch.Tensor] | None): Tuple of cached key and value tensors,
+                or None if no cache is available.
 
         Returns:
-            tuple[torch.Tensor, KVState]: Output embedding of shape (batch_size, seq_len, embed_dim)
-                and newly computed KVState for the current input.
+            tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]: Output embedding of shape (batch_size, seq_len, embed_dim)
+                and newly computed key and value tensors for the current input.
         """
         attn_output, new_kv_state = self.attention(embedding, kv_cache)
         x = self.norm1(embedding + attn_output)
@@ -137,27 +143,32 @@ class Transformer(nn.Module):
         )
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
-    def forward(self, query_token_ids: torch.Tensor, kv_cache: KVCache) -> torch.Tensor:
+    def forward(
+        self,
+        query_token_ids: torch.Tensor,
+        kv_cache: Sequence[tuple[torch.Tensor, torch.Tensor]] | None,
+    ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]]]:
         """Forward the input token ids through the transformer model.
 
         The `kv_cache` will be updated with the newly computed KV states as a side effect.
 
         Args:
             query_token_ids (torch.Tensor): Input token IDs of shape (batch_size, seq_len).
-            kv_cache (KVCache): Cache of past key and value tensors.
+            kv_cache (Sequence[tuple[torch.Tensor, torch.Tensor]] | None): Sequence of tuples containing
+                cached key and value tensors, or None if no cache is available.
 
         Returns:
-            torch.Tensor: Output logits of shape (batch_size, seq_len, vocab_size).
+            tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]]]: Output logits of shape
+                (batch_size, seq_len, vocab_size) and the newly computed list of key and value tensors
+                for the current input.
         """
         embedding: torch.Tensor = self.embedding(query_token_ids)
 
-        kv_states = kv_cache.get_kv_states()
-        kv_states = kv_states if len(kv_states) > 0 else [None] * len(self.blocks)
+        kv_states = kv_cache if kv_cache is not None else [None] * len(self.blocks)
+        new_kv_states: list[tuple[torch.Tensor, torch.Tensor]] = []
 
-        new_kv_states: list[KVState] = []
         for block, kv_state in zip(self.blocks, kv_states, strict=True):
             embedding, new_kv_state = block(embedding, kv_state)
             new_kv_states.append(new_kv_state)
-        kv_cache.update(kv_states=new_kv_states)
 
-        return self.lm_head(embedding)
+        return self.lm_head(embedding), new_kv_states
