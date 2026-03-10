@@ -39,13 +39,13 @@ class _Attention(nn.Module):
         self.out_linear = nn.Linear(embed_dim, embed_dim)
 
     def forward(
-        self, embedding: torch.Tensor, kv_cache: tuple[torch.Tensor, torch.Tensor] | None
+        self, embedding: torch.Tensor, kv_state: tuple[torch.Tensor, torch.Tensor] | None
     ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """Compute attention output for the given query and KV cache.
 
         Args:
             embedding (torch.Tensor): Input embedding of shape (batch_size, seq_len, embed_dim).
-            kv_cache (tuple[torch.Tensor, torch.Tensor] | None): Tuple of cached key and value tensors,
+            kv_state (tuple[torch.Tensor, torch.Tensor] | None): Tuple of cached key and value tensors,
                 or None if no cache is available.
 
         Returns:
@@ -66,8 +66,8 @@ class _Attention(nn.Module):
 
         # Attention
         query = q
-        key = k if kv_cache is None else torch.cat([kv_cache[0], k], dim=2)
-        value = v if kv_cache is None else torch.cat([kv_cache[1], v], dim=2)
+        key = k if kv_state is None else torch.cat([kv_state[0], k], dim=2)
+        value = v if kv_state is None else torch.cat([kv_state[1], v], dim=2)
 
         # Build the lower-right causal mask so that query position i attends to all
         # key positions up to (S - L + i), which is correct for both full-sequence
@@ -109,20 +109,20 @@ class _TransformerBlock(nn.Module):
         self.norm2 = nn.LayerNorm(embed_dim)
 
     def forward(
-        self, embedding: torch.Tensor, kv_cache: tuple[torch.Tensor, torch.Tensor] | None
+        self, embedding: torch.Tensor, kv_state: tuple[torch.Tensor, torch.Tensor] | None
     ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """Forward the input embedding through the transformer block.
 
         Args:
             embedding (torch.Tensor): Input embedding of shape (batch_size, seq_len, embed_dim).
-            kv_cache (tuple[torch.Tensor, torch.Tensor] | None): Tuple of cached key and value tensors,
+            kv_state (tuple[torch.Tensor, torch.Tensor] | None): Tuple of cached key and value tensors,
                 or None if no cache is available.
 
         Returns:
             tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]: Output embedding of shape (batch_size, seq_len, embed_dim)
                 and newly computed key and value tensors for the current input.
         """
-        attn_output, new_kv_state = self.attention(embedding, kv_cache)
+        attn_output, new_kv_state = self.attention(embedding, kv_state)
         x = self.norm1(embedding + attn_output)
         ff_output = self.feedforward(x)
         return self.norm2(x + ff_output), new_kv_state
@@ -146,15 +146,13 @@ class Transformer(nn.Module):
     def forward(
         self,
         query_token_ids: torch.Tensor,
-        kv_cache: Sequence[tuple[torch.Tensor, torch.Tensor]] | None,
+        kv_states: Sequence[tuple[torch.Tensor, torch.Tensor]] | None,
     ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]]]:
         """Forward the input token ids through the transformer model.
 
-        The `kv_cache` will be updated with the newly computed KV states as a side effect.
-
         Args:
             query_token_ids (torch.Tensor): Input token IDs of shape (batch_size, seq_len).
-            kv_cache (Sequence[tuple[torch.Tensor, torch.Tensor]] | None): Sequence of tuples containing
+            kv_states (Sequence[tuple[torch.Tensor, torch.Tensor]] | None): Sequence of tuples containing
                 cached key and value tensors, or None if no cache is available.
 
         Returns:
@@ -164,10 +162,10 @@ class Transformer(nn.Module):
         """
         embedding: torch.Tensor = self.embedding(query_token_ids)
 
-        kv_states = kv_cache if kv_cache is not None else [None] * len(self.blocks)
+        curr_kv_states = kv_states if kv_states is not None else [None] * len(self.blocks)
         new_kv_states: list[tuple[torch.Tensor, torch.Tensor]] = []
 
-        for block, kv_state in zip(self.blocks, kv_states, strict=True):
+        for block, kv_state in zip(self.blocks, curr_kv_states, strict=True):
             embedding, new_kv_state = block(embedding, kv_state)
             new_kv_states.append(new_kv_state)
 

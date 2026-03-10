@@ -64,7 +64,7 @@ class FakeModel(Model):
         kv_states = kv_cache.get_kv_states() or None
 
         logits, new_kv_states = self.transformer.forward(
-            query_token_ids=query_token_ids, kv_cache=kv_states
+            query_token_ids=query_token_ids, kv_states=kv_states
         )
 
         new_kv_states = map(KVState._make, new_kv_states)
