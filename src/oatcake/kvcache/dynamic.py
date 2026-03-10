@@ -1,6 +1,6 @@
 """Define `DynamicCache`, implementing `KVCache`."""
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import overload, override
 
 import torch
@@ -26,7 +26,7 @@ class DynamicCache(KVCache, Sequence):
         self.cache = transformers.DynamicCache()
 
     @override
-    def update(self, kv_states: Sequence[KVState]) -> None:
+    def update(self, kv_states: Iterable[KVState]) -> None:
         for layer_idx, (k, v) in enumerate(kv_states):
             self.cache.update(key_states=k, value_states=v, layer_idx=layer_idx)
 

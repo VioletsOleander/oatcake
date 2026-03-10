@@ -56,7 +56,7 @@ class Qwen3Model(Model):
             raise TypeError("Qwen3Model only supports DynamicCache as KVCache.")
 
         input_ids = query_token_ids
-        forward_out: CausalLMOutputWithPast = self.hf_model(
+        forward_out: CausalLMOutputWithPast = self.hf_model.forward(
             input_ids=cast("torch.LongTensor", input_ids),
             logits_to_keep=0,  # keeps all logits
             use_cache=True,

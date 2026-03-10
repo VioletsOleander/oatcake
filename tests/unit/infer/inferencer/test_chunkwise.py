@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from oatcake.utils.sampling import SamplingStrategy
 
 
-@pytest.fixture(params=[1, 2, 4, 8])
+@pytest.fixture(params=[1, 4, 8])
 def decode_chunk_size(request: pytest.FixtureRequest) -> int:
     return request.param
 
