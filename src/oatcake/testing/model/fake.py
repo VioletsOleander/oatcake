@@ -61,8 +61,7 @@ class FakeModel(Model):
     @override
     def forward(self, query_token_ids: torch.Tensor, kv_cache: KVCache) -> torch.Tensor:
         """Perform a forward pass through the fake model."""
-        kv_states = kv_cache.get_kv_states()
-        kv_states = kv_states if len(kv_states) > 0 else None
+        kv_states = kv_cache.get_kv_states() or None
 
         logits, new_kv_states = self.transformer.forward(
             query_token_ids=query_token_ids, kv_cache=kv_states
