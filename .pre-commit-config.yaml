@@ -1,0 +1,37 @@
+repos:
+  - repo: https://github.com/streetsidesoftware/cspell-cli
+    rev: v9.4.0
+    hooks:
+      - id: cspell # Spell check changed files
+        name: Cspell (Files)
+      - id: cspell # Spell check the commit message
+        name: Cspell (Commit Message)
+        args:
+          - --no-must-find-files
+          - --no-progress
+          - --no-summary
+          - --files
+          - .git/COMMIT_EDITMSG
+        stages: [commit-msg]
+        always_run: true
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.10
+    hooks:
+      - id: ruff-check # Ruff Linter
+        name: Ruff Lint
+      - id: ruff-format # Ruff Formatter Check
+        name: Ruff Format Check
+        args: [--check]
+  - repo: local
+    hooks:
+      - id: ty-check
+        name: Ty Check
+        entry: uv run ty check
+        language: unsupported
+        types: [python]
+      - id: import-linter
+        name: Import Linter
+        entry: uv run lint-imports
+        language: unsupported
+        types: [python]
+        pass_filenames: false

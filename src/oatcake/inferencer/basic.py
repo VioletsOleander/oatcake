@@ -1,0 +1,125 @@
+"""Define `BasicInferencer`, implementing `Inferencer`."""
+
+from typing import TYPE_CHECKING, override
+
+import torch
+
+from oatcake.interface import DecodeOutput, KVCache, PrefillOutput
+from oatcake.interface import Inferencer as InferencerProtocol
+from oatcake.utils.sampling import sample_tokens
+
+from .utils.collection import OutputCollection
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from oatcake.interface import Model
+    from oatcake.utils.sampling import SamplingStrategy
+
+__all__ = ["BasicInferencer", "InferencerImpl"]
+
+
+class BasicInferencer(InferencerProtocol):
+    """Basic Inferencer implements the `Inferencer` protocol.
+
+    BasicInferencer delegates the forward computation to `Model`,
+    and utilizes it to provide simple implementations for the `prefill` and `decode` methods.
+
+    Attributes:
+        model (Model): The model used to perform forward computation.
+    """
+
+    model: Model
+
+    def __init__(self, model: Model) -> None:
+        self.model = model
+
+    @torch.no_grad()
+    @override
+    def prefill(
+        self, query_token_ids: torch.Tensor, kv_cache: KVCache, sampling_strategy: SamplingStrategy
+    ) -> PrefillOutput:
+        output_collection = OutputCollection()
+
+        stream = self._generation_stream(
+            query_token_ids=query_token_ids, kv_cache=kv_cache, sampling_strategy=sampling_strategy
+        )
+        output_ids, output_logits = next(stream)
+        output_collection.update(output_ids, output_logits)
+
+        return PrefillOutput._make(output_collection.finalize())
+
+    @torch.no_grad()
+    @override
+    def decode(
+        self,
+        query_token_ids: torch.Tensor,
+        kv_cache: KVCache,
+        max_new_tokens: int,
+        sampling_strategy: SamplingStrategy,
+    ) -> DecodeOutput:
+        """Process `query_token_ids` and auto-regressively generate next new tokens.
+
+        Check for EOS token after each generation iteration, which means device
+        synchronization will happen at each iteration.
+
+        Refers to the interface `Inferencer.decode` for more details.
+        """
+        if max_new_tokens <= 0:
+            raise ValueError(f"max_new_tokens must be positive, got {max_new_tokens}")
+
+        output_collection = OutputCollection()
+
+        stream = self._generation_stream(
+            query_token_ids=query_token_ids, kv_cache=kv_cache, sampling_strategy=sampling_strategy
+        )
+        for _ in range(max_new_tokens):
+            output_ids, output_logits = next(stream)
+            output_collection.update(output_ids, output_logits)
+
+            # Check for EOS token in the newly generated tokens
+            # currently only reasonable for batch_size=1
+            if (output_ids == self.model.eos_token_id).any().item():
+                break
+
+        return DecodeOutput._make(output_collection.finalize())
+
+    def _generation_stream(
+        self,
+        query_token_ids: torch.Tensor,
+        kv_cache: KVCache,
+        sampling_strategy: SamplingStrategy,
+    ) -> Generator[tuple[torch.Tensor, torch.Tensor]]:
+        """Generate new tokens auto-regressively as a stream.
+
+        Each iteration performs:
+        1. Forward the model with `query_token_ids` to get logits.
+        2. Sample the next token ids from the logits according to `sampling_strategy`.
+        3. Update `query_token_ids` with the newly sampled token ids.
+
+        Args:
+            query_token_ids (torch.Tensor): Initial query token ids of shape `[batch_size, num_query_tokens]`.
+            kv_cache (KVCache): Keys and values tensors corresponding to the past tokens.
+            sampling_strategy (SamplingStrategy): Sampling strategy for new token generation.
+
+        Yields:
+            tuple[torch.Tensor, torch.Tensor]: Sampled new token ids of shape `[batch_size, 1]`,
+                and computed logits.
+                The computed logits are of shape `[batch_size, num_query_tokens, vocab_size]`
+                for the first call, and of shape `[batch_size, 1, vocab_size]` for subsequent calls.
+        """
+        while True:
+            # 1. Forward
+            token_logits = self.model.forward(query_token_ids, kv_cache)
+
+            # 2. Sample
+            next_token_logits = token_logits[:, -1].to(dtype=torch.float32, copy=True)
+            next_token_ids = sample_tokens(next_token_logits, sampling_strategy)
+
+            # 3. Update
+            query_token_ids = next_token_ids
+
+            yield next_token_ids, token_logits
+
+
+InferencerImpl = BasicInferencer
