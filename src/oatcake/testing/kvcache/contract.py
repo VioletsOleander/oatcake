@@ -28,6 +28,13 @@ class KVCacheContractTests:
         kv_states: list[KVState] = request.param
         return kv_states
 
+    def assert_equal(
+        self, x: Sequence[KVState], y: Sequence[KVState], x_range: slice, y_range: slice
+    ) -> None:
+        for (k1, v1), (k2, v2) in zip(x, y, strict=True):
+            assert torch.equal(k1[..., x_range, :], k2[..., y_range, :])
+            assert torch.equal(v1[..., x_range, :], v2[..., y_range, :])
+
     def update_test(self, kv_cache: KVCache, kv_states: Sequence[KVState]) -> None:
         num_tokens_new = kv_states[0].keys.size(-2)
 
@@ -42,24 +49,38 @@ class KVCacheContractTests:
         # Token numbers match
         assert num_tokens_after == num_tokens_before + num_tokens_new
 
-        # New states match
-        for (k_new, v_new), (k_after, v_after) in zip(
-            kv_states, kv_states_after[-len(kv_states) :], strict=True
-        ):
-            assert torch.equal(k_after[:, :, -num_tokens_new:, :], k_new)
-            assert torch.equal(v_after[:, :, -num_tokens_new:, :], v_new)
-
-        # Old states are unchanged
-        if num_tokens_before == 0:
-            assert len(kv_states_before) == 0
+        if num_tokens_before == 0 and num_tokens_after == 0:
+            assert kv_states_before is None
+            assert kv_states_after is None
+        elif num_tokens_before == 0 and num_tokens_after > 0:
+            assert kv_states_before is None
+            assert kv_states_after is not None
+            # New states match
+            self.assert_equal(
+                x=kv_states_after,
+                y=kv_states,
+                x_range=slice(None, None),
+                y_range=slice(None, None),
+            )
+        elif num_tokens_before > 0 and num_tokens_after > 0:
+            assert kv_states_before is not None
+            assert kv_states_after is not None
+            # Previous states match
+            self.assert_equal(
+                x=kv_states_before,
+                y=kv_states_after,
+                x_range=slice(None, None),
+                y_range=slice(None, num_tokens_before),
+            )
+            # New states match
+            self.assert_equal(
+                x=kv_states_after,
+                y=kv_states,
+                x_range=slice(num_tokens_before, None),
+                y_range=slice(None, None),
+            )
         else:
-            for (k_before, v_before), (k_after, v_after) in zip(
-                kv_states_before, kv_states_after, strict=True
-            ):
-                assert k_after.size(-2) == k_before.size(-2) + num_tokens_new
-                assert v_after.size(-2) == v_before.size(-2) + num_tokens_new
-                assert torch.equal(k_after[:, :, :-num_tokens_new, :], k_before)
-                assert torch.equal(v_after[:, :, :-num_tokens_new, :], v_before)
+            pytest.fail("Unexpected token number scenario")
 
     def crop_test(self, kv_cache: KVCache, num_tokens_crop: int) -> None:
         num_tokens_before = kv_cache.get_num_tokens()
@@ -73,11 +94,21 @@ class KVCacheContractTests:
         # Token numbers match
         assert num_tokens_after == num_tokens_before - num_tokens_crop
 
-        # Remaining states match
-        for (k_before, v_before), (k_after, v_after) in zip(
-            kv_states_before, kv_states_after, strict=True
-        ):
-            assert k_after.size(-2) == k_before.size(-2) - num_tokens_crop
-            assert v_after.size(-2) == v_before.size(-2) - num_tokens_crop
-            assert torch.equal(k_after, k_before[:, :, :num_tokens_after, :])
-            assert torch.equal(v_after, v_before[:, :, :num_tokens_after, :])
+        if num_tokens_before == 0 and num_tokens_after == 0:
+            assert kv_states_before is None
+            assert kv_states_after is None
+        elif num_tokens_before > 0 and num_tokens_after == 0:
+            assert kv_states_before is not None
+            assert kv_states_after is None
+        elif num_tokens_before > 0 and num_tokens_after > 0:
+            assert kv_states_before is not None
+            assert kv_states_after is not None
+            # Remaining states match
+            self.assert_equal(
+                x=kv_states_before,
+                y=kv_states_after,
+                x_range=slice(None, num_tokens_before - num_tokens_crop),
+                y_range=slice(None, None),
+            )
+        else:
+            pytest.fail("Unexpected token number scenario")

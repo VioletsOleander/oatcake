@@ -42,10 +42,27 @@ class KVCache(Protocol):
         """
         ...
 
+    def update_layer(self, kv_state: KVState, layer_idx: int) -> None:
+        """Update the storage with new key and value tensors for a specific layer.
+
+        `kv_state` contains the new key and value tensors for the layer specified by `layer_idx`.
+        `layer_idx` should be a valid index, i.e. range from 0 to the number of transformer layers - 1.
+
+        The shape of key and value tensors in `kv_state` should be the same as those already stored
+        for the same layer (if any).
+
+        Args:
+            kv_state (KVState): A KVState containing the new key and value tensors for the layer.
+            layer_idx (int): The index of the layer to update, should be non-negative.
+        """
+        ...
+
     def crop(self, num_tokens_crop: int) -> None:
         """Crop the latest `num_tokens_crop` tokens from the cache.
 
-        `num_tokens_crop` should be non-negative and not exceed the current number of tokens in the cache.
+        If `num_tokens_crop` is non-positive, the cache will remain unchanged.
+        If `num_tokens_crop` exceeds the number of currently cached tokens, all
+        cached tokens will be cropped.
 
         Args:
             num_tokens_crop (int): Number of latest tokens to crop from the cache.
@@ -60,14 +77,22 @@ class KVCache(Protocol):
         """
         ...
 
-    def get_kv_states(self) -> list[KVState]:
+    def get_kv_states(self) -> list[KVState] | None:
         """Get the current stored KV states for all layers.
 
-        If `self` is just initialized and there is no KV state stored (i.e. `update` has never been called),
-        return a empty list.
+        Returns:
+            list[KVState] | None: A list of KVState. If the cache is empty, None is returned.
+        """
+        ...
+
+    def get_kv_state(self, layer_idx: int) -> KVState | None:
+        """Get the current stored KV state for a specific layer.
+
+        Args:
+            layer_idx (int): The index of the layer to get the KV state for, should be non-negative.
 
         Returns:
-            list[KVState]: A list of KVState. If `update` has never been called, it is empty.
-                Otherwise its length is equal to the number of transformer layers.
+            KVState | None: The KVState for the specified layer.
+                If the cache is empty or the layer index is out of range, None is returned.
         """
         ...
